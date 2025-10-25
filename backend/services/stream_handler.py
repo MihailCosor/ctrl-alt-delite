@@ -2,6 +2,7 @@ import json
 import os
 import asyncio
 import requests
+import httpx
 from sseclient import SSEClient
 from dotenv import load_dotenv
 from .classifier import TransactionClassifier
@@ -12,6 +13,7 @@ API_KEY = os.getenv("API_KEY", "YOUR_API_KEY")
 STREAM_URL = os.getenv("STREAM_URL", "https://95.217.75.14:8443/stream")
 FLAG_URL = os.getenv("FLAG_URL", "https://95.217.75.14:8443/api/flag")
 VERIFY_SSL = os.getenv("VERIFY_SSL", "false").lower() == "true"
+MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "50"))
 
 headers = {"X-API-Key": API_KEY}
 
@@ -23,16 +25,20 @@ if not VERIFY_SSL:
 # Initialize classifier (loaded once at startup)
 classifier = TransactionClassifier()
 
-def flag_transaction(trans_num, flag_value):
-    """Flag a transaction with the given classification value."""
-    try:
-        payload = {"trans_num": trans_num, "flag_value": flag_value}
-        response = requests.post(FLAG_URL, headers=headers, json=payload, timeout=10, verify=VERIFY_SSL)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error flagging transaction {trans_num}: {e}")
-        return None
+# Semaphore to limit concurrent processing
+semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+
+async def flag_transaction(trans_num, flag_value, client: httpx.AsyncClient):
+    """Flag a transaction with the given classification value (async)."""
+    async with semaphore:
+        try:
+            payload = {"trans_num": trans_num, "flag_value": flag_value}
+            response = await client.post(FLAG_URL, headers=headers, json=payload, timeout=10.0)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            print(f"Error flagging transaction {trans_num}: {e}")
+            return None
 
 async def save_transaction(database, transaction, classification):
     """Save transaction to MongoDB."""
@@ -47,40 +53,77 @@ async def save_transaction(database, transaction, classification):
     except Exception as e:
         print(f"Error saving transaction: {e}")
 
+async def process_single_transaction(transaction, database, http_client: httpx.AsyncClient):
+    """Process a single transaction asynchronously."""
+    try:
+        trans_num = transaction.get('trans_num')
+        
+        # Classify the transaction using the pretrained model
+        classification_value = classifier.classify(transaction)
+
+        # Flag the transaction (async)
+        result = await flag_transaction(trans_num, classification_value, http_client)
+        if result:
+            print(f"✓ Flagged {trans_num} = {classification_value}")
+
+        # Save to database
+        await save_transaction(database, transaction, classification_value)
+
+    except Exception as e:
+        print(f"Error processing transaction {transaction.get('trans_num', '?')}: {e}")
+
 async def handle_transaction_from_stream(database):
-    """Connect to SSE stream and process transactions in background."""
+    """Connect to SSE stream and process transactions concurrently."""
     await asyncio.sleep(1)  # Brief delay to ensure app is ready
     
     print("Connecting to transaction stream...")
     print(f"SSL Verification: {'Enabled' if VERIFY_SSL else 'Disabled'}")
-    try:
-        response = requests.get(STREAM_URL, headers=headers, stream=True, timeout=30, verify=VERIFY_SSL)
-        client = SSEClient(response)
+    print(f"Max Concurrent Tasks: {MAX_CONCURRENT_TASKS}")
+    
+    # Create async HTTP client for reuse
+    async with httpx.AsyncClient(verify=VERIFY_SSL) as http_client:
+        try:
+            response = requests.get(STREAM_URL, headers=headers, stream=True, timeout=30, verify=VERIFY_SSL)
+            client = SSEClient(response)
 
-        for event in client.events():
-            if event.data:
-                try:
-                    transaction = json.loads(event.data)
-                    trans_num = transaction.get('trans_num')
-                    print(f"Received transaction: {trans_num}")
+            # Track active tasks
+            active_tasks = []
 
-                    # Classify the transaction using the pretrained model
-                    classification_value = classifier.classify(transaction)
+            for event in client.events():
+                if event.data:
+                    try:
+                        transaction = json.loads(event.data)
+                        trans_num = transaction.get('trans_num')
+                        print(f"Received transaction: {trans_num}")
 
-                    # Flag the transaction
-                    result = flag_transaction(trans_num, classification_value)
-                    if result:
-                        print(f"Flagged transaction {trans_num} with value {classification_value}")
+                        # Create async task for this transaction (non-blocking)
+                        task = asyncio.create_task(
+                            process_single_transaction(transaction, database, http_client)
+                        )
+                        active_tasks.append(task)
 
-                    # Save to database
-                    await save_transaction(database, transaction, classification_value)
+                        # Clean up completed tasks to avoid memory buildup
+                        active_tasks = [t for t in active_tasks if not t.done()]
 
-                except json.JSONDecodeError as e:
-                    print(f"Error decoding transaction data: {e}")
-                except Exception as e:
-                    print(f"Error processing transaction: {e}")
-                    
-    except requests.exceptions.RequestException as e:
-        print(f"Stream connection error: {e}")
-    except Exception as e:
-        print(f"Unexpected error in stream handler: {e}")
+                        # If we have too many pending tasks, wait for some to complete
+                        if len(active_tasks) > MAX_CONCURRENT_TASKS * 2:
+                            done, active_tasks = await asyncio.wait(
+                                active_tasks, 
+                                return_when=asyncio.FIRST_COMPLETED
+                            )
+                            active_tasks = list(active_tasks)
+
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding transaction data: {e}")
+                    except Exception as e:
+                        print(f"Error queuing transaction: {e}")
+
+            # Wait for all remaining tasks to complete
+            if active_tasks:
+                print(f"Waiting for {len(active_tasks)} remaining tasks...")
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+                        
+        except requests.exceptions.RequestException as e:
+            print(f"Stream connection error: {e}")
+        except Exception as e:
+            print(f"Unexpected error in stream handler: {e}")
