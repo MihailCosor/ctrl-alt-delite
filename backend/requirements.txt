@@ -8,7 +8,6 @@ pymongo==4.6.0
 
 # HTTP Clients
 requests==2.31.0
-httpx==0.25.2
 urllib3==2.1.0
 
 # SSE Stream Client
@@ -20,6 +19,9 @@ xgboost==2.0.2
 joblib==1.3.2
 numpy==1.26.2
 pandas==2.1.3
+
+# Geographic calculations
+geopy==2.4.1
 
 # Utilities
 python-dotenv==1.0.0

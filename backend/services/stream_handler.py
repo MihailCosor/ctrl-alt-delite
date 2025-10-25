@@ -1,11 +1,15 @@
 import json
 import os
-import asyncio
+import threading
 import requests
-import httpx
 from sseclient import SSEClient
 from dotenv import load_dotenv
 from .classifier import TransactionClassifier
+from .state_manager import StateManager
+from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+import pymongo
+from pymongo import MongoClient
 
 load_dotenv()
 
@@ -13,7 +17,8 @@ API_KEY = os.getenv("API_KEY", "YOUR_API_KEY")
 STREAM_URL = os.getenv("STREAM_URL", "https://95.217.75.14:8443/stream")
 FLAG_URL = os.getenv("FLAG_URL", "https://95.217.75.14:8443/api/flag")
 VERIFY_SSL = os.getenv("VERIFY_SSL", "false").lower() == "true"
-MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "50"))
+MAX_WORKERS = int(os.getenv("MAX_CONCURRENT_TASKS", "100"))
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 
 headers = {"X-API-Key": API_KEY}
 
@@ -22,108 +27,184 @@ if not VERIFY_SSL:
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Initialize classifier (loaded once at startup)
-classifier = TransactionClassifier()
+# Initialize state manager (loaded once at startup)
+state_manager = StateManager(mongo_url=MONGO_URL)
 
-# Semaphore to limit concurrent processing
-semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+# Initialize classifier with state manager (loaded once at startup)
+classifier = TransactionClassifier(state_manager=state_manager)
 
-async def flag_transaction(trans_num, flag_value, client: httpx.AsyncClient):
-    """Flag a transaction with the given classification value (async)."""
-    async with semaphore:
-        try:
-            payload = {"trans_num": trans_num, "flag_value": flag_value}
-            response = await client.post(FLAG_URL, headers=headers, json=payload, timeout=10.0)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            print(f"Error flagging transaction {trans_num}: {e}")
-            return None
+# Thread pool for processing transactions
+executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="transaction-worker")
 
-async def save_transaction(database, transaction, classification):
-    """Save transaction to MongoDB."""
+def flag_transaction(trans_num, flag_value):
+    """Flag a transaction with the given classification value (fire-and-forget in separate thread)."""
     try:
-        collection = database.transactions
+        payload = {"trans_num": trans_num, "flag_value": flag_value}
+        response = requests.post(
+            FLAG_URL, 
+            headers=headers, 
+            json=payload, 
+            timeout=2.0, 
+            verify=VERIFY_SSL
+        )
+        response.raise_for_status()
+        print(f"  ↳ Flagged {trans_num} = {flag_value}")
+        return response.json()
+    except requests.exceptions.Timeout:
+        # Silently continue on timeout - this is fire-and-forget
+        return None
+    except requests.exceptions.RequestException as e:
+        # Only log non-timeout errors
+        if "timeout" not in str(e).lower():
+            print(f"⚠ HTTP error flagging {trans_num}: {e}")
+        return None
+    except Exception as e:
+        print(f"⚠ Error flagging {trans_num}: {e}")
+        return None
+
+
+def save_transaction(db_collection, transaction, classification):
+    """Save transaction to MongoDB (synchronous)."""
+    try:
         doc = {
-            **transaction,
+            "transaction": transaction,
             "classification": classification,
-            "processed_at": transaction.get("timestamp")
+            "processed_at": datetime.now(timezone.utc)
         }
-        await collection.insert_one(doc)
+        db_collection.insert_one(doc)
     except Exception as e:
         print(f"Error saving transaction: {e}")
 
-async def process_single_transaction(transaction, database, http_client: httpx.AsyncClient):
-    """Process a single transaction asynchronously."""
+
+def process_single_transaction(transaction, db_collection):
+    """
+    Process a single transaction in a worker thread.
+    
+    Flow with state management:
+    1. Classify the transaction (reads state)
+    2. Fire off flag request in background thread (don't wait)
+    3. Save to database
+    4. Update state (writes state for next transaction)
+    """
+    trans_num = transaction.get('trans_num', '?')
     try:
-        trans_num = transaction.get('trans_num')
-        
-        # Classify the transaction using the pretrained model
+        # Classify the transaction (reads current state from MongoDB)
         classification_value = classifier.classify(transaction)
-
-        # Flag the transaction (async)
-        result = await flag_transaction(trans_num, classification_value, http_client)
-        if result:
-            print(f"✓ Flagged {trans_num} = {classification_value}")
-
+        print(f"✓ Classified {trans_num} = {classification_value}")
+        
+        # Fire off flagging in separate thread (fire-and-forget)
+        threading.Thread(
+            target=flag_transaction, 
+            args=(trans_num, classification_value),
+            daemon=True,
+            name=f"flag-{trans_num[:8]}"
+        ).start()
+        
         # Save to database
-        await save_transaction(database, transaction, classification_value)
+        save_transaction(db_collection, transaction, classification_value)
+        
+        # Update state for future transactions
+        state_manager.update_state(transaction)
 
     except Exception as e:
-        print(f"Error processing transaction {transaction.get('trans_num', '?')}: {e}")
+        print(f"✗ Error processing transaction {trans_num}: {e}")
+        import traceback
+        traceback.print_exc()
 
-async def handle_transaction_from_stream(database):
-    """Connect to SSE stream and process transactions concurrently."""
-    await asyncio.sleep(1)  # Brief delay to ensure app is ready
+def handle_transaction_from_stream_sync(mongo_url):
+    """
+    Connect to SSE stream and process transactions using threading.
+    This runs in a single background thread started by FastAPI.
+    """
+    import time
+    time.sleep(1)  # Brief delay to ensure app is ready
     
     print("Connecting to transaction stream...")
     print(f"SSL Verification: {'Enabled' if VERIFY_SSL else 'Disabled'}")
-    print(f"Max Concurrent Tasks: {MAX_CONCURRENT_TASKS}")
+    print(f"Max Workers: {MAX_WORKERS}")
+    print(f"Stream URL: {STREAM_URL}")
+    print(f"Flag URL: {FLAG_URL}")
     
-    # Create async HTTP client for reuse
-    async with httpx.AsyncClient(verify=VERIFY_SSL) as http_client:
-        try:
-            response = requests.get(STREAM_URL, headers=headers, stream=True, timeout=30, verify=VERIFY_SSL)
-            client = SSEClient(response)
+    # Create synchronous MongoDB connection
+    mongo_client = MongoClient(mongo_url)
+    database = mongo_client.transaction_classifier
+    db_collection = database.transactions
+    
+    try:
+        print("Initiating SSE stream connection...")
+        response = requests.get(STREAM_URL, headers=headers, stream=True, timeout=30, verify=VERIFY_SSL)
+        print(f"Stream response status: {response.status_code}")
+        response.raise_for_status()
+        
+        client = SSEClient(response)
+        print("✓ Successfully connected to transaction stream!")
+        print("Listening for transaction events...")
+        
+        event_count = 0
+        
+        for event in client.events():
+            event_count += 1
+            if event_count % 50 == 0:
+                print(f"[Stats] Received {event_count} events")
+            
+            if event.data:
+                try:
+                    transaction = json.loads(event.data)
+                    # calc unix time based on trans_date and trans_time
+                    trans_date = transaction.get('trans_date')
+                    trans_time = transaction.get('trans_time')
+                    if trans_date and trans_time:
+                        transaction['unix_time'] = int(time.mktime(time.strptime(f"{trans_date} {trans_time}", "%Y-%m-%d %H:%M:%S")))
+                    else:
+                        transaction['unix_time'] = 0
 
-            # Track active tasks
-            active_tasks = []
+                    trans_num = transaction.get('trans_num')
+                    print(f"Received transaction: {trans_num}")
+                    # display transaction details if needed
+                    print(json.dumps(transaction, indent=2))
+                    
+                    # Submit transaction to thread pool for processing
+                    executor.submit(process_single_transaction, transaction, db_collection)
+                    
+                except json.JSONDecodeError as e:
+                    print(f"Error decoding transaction data: {e}")
+                except Exception as e:
+                    print(f"Error queuing transaction: {e}")
+                    
+    except requests.exceptions.RequestException as e:
+        print(f"Stream connection error: {e}")
+    except Exception as e:
+        print(f"Unexpected error in stream handler: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        mongo_client.close()
+        print("Stream handler stopped.")
 
-            for event in client.events():
-                if event.data:
-                    try:
-                        transaction = json.loads(event.data)
-                        trans_num = transaction.get('trans_num')
-                        print(f"Received transaction: {trans_num}")
 
-                        # Create async task for this transaction (non-blocking)
-                        task = asyncio.create_task(
-                            process_single_transaction(transaction, database, http_client)
-                        )
-                        active_tasks.append(task)
-
-                        # Clean up completed tasks to avoid memory buildup
-                        active_tasks = [t for t in active_tasks if not t.done()]
-
-                        # If we have too many pending tasks, wait for some to complete
-                        if len(active_tasks) > MAX_CONCURRENT_TASKS * 2:
-                            done, active_tasks = await asyncio.wait(
-                                active_tasks, 
-                                return_when=asyncio.FIRST_COMPLETED
-                            )
-                            active_tasks = list(active_tasks)
-
-                    except json.JSONDecodeError as e:
-                        print(f"Error decoding transaction data: {e}")
-                    except Exception as e:
-                        print(f"Error queuing transaction: {e}")
-
-            # Wait for all remaining tasks to complete
-            if active_tasks:
-                print(f"Waiting for {len(active_tasks)} remaining tasks...")
-                await asyncio.gather(*active_tasks, return_exceptions=True)
-                        
-        except requests.exceptions.RequestException as e:
-            print(f"Stream connection error: {e}")
-        except Exception as e:
-            print(f"Unexpected error in stream handler: {e}")
+# Async wrapper for FastAPI lifespan compatibility
+async def handle_transaction_from_stream(database):
+    """
+    Async wrapper that starts the synchronous stream handler in a background thread.
+    This is called by FastAPI's lifespan manager.
+    """
+    import asyncio
+    
+    # Get MongoDB URL from database connection
+    mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+    
+    # Start the stream handler in a separate thread
+    stream_thread = threading.Thread(
+        target=handle_transaction_from_stream_sync,
+        args=(mongo_url,),
+        daemon=True,
+        name="stream-handler"
+    )
+    stream_thread.start()
+    
+    print(f"Stream handler thread started: {stream_thread.name}")
+    
+    # Keep the async function alive (FastAPI lifespan requirement)
+    # This will run until the application shuts down
+    while stream_thread.is_alive():
+        await asyncio.sleep(10)  # Check every 10 seconds
