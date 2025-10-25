@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import motor.motor_asyncio
 import os
 import asyncio
@@ -12,7 +13,25 @@ MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 database = client.transaction_classifier
 
-app = FastAPI(title="Transaction Classifier API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Run stream handler in background task
+    task = asyncio.create_task(handle_transaction_from_stream(database))
+    yield
+    # Shutdown: Close database connection
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    client.close()
+
+app = FastAPI(
+    title="Transaction Classifier API",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+)
 
 # CORS middleware (adjust origins as needed)
 app.add_middleware(
@@ -44,12 +63,3 @@ async def get_stats():
         return {"total_transactions": total}
     except Exception as e:
         return {"error": str(e)}
-
-@app.on_event("startup")
-async def startup_event():
-    # Run stream handler in background task
-    asyncio.create_task(handle_transaction_from_stream(database))
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    client.close()

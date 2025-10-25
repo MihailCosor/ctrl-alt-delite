@@ -4,6 +4,7 @@ import asyncio
 import requests
 from sseclient import SSEClient
 from dotenv import load_dotenv
+from .classifier import TransactionClassifier
 
 load_dotenv()
 
@@ -18,6 +19,9 @@ headers = {"X-API-Key": API_KEY}
 if not VERIFY_SSL:
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Initialize classifier (loaded once at startup)
+classifier = TransactionClassifier()
 
 def flag_transaction(trans_num, flag_value):
     """Flag a transaction with the given classification value."""
@@ -60,8 +64,8 @@ async def handle_transaction_from_stream(database):
                     trans_num = transaction.get('trans_num')
                     print(f"Received transaction: {trans_num}")
 
-                    # TODO: Implement classification logic here
-                    classification_value = 0
+                    # Classify the transaction using the pretrained model
+                    classification_value = classifier.classify(transaction)
 
                     # Flag the transaction
                     result = flag_transaction(trans_num, classification_value)
