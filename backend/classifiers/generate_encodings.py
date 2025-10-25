@@ -4,6 +4,10 @@ Generate Target Encoding Maps from Training Data
 This script extracts the target encoding maps from the training process
 and saves them directly to MongoDB for use in production inference.
 
+NOTE: The current model (robica_2.0) does NOT use target encodings.
+This script is kept for reference and potential future models (like corina_1.0)
+that may require target encodings.
+
 Usage:
     python generate_encodings.py <path_to_training_data.csv> [mongo_url]
 
@@ -162,6 +166,8 @@ def main():
     print(f"\n✓ Complete!")
     print(f"\nTarget encodings are now available in MongoDB and will be loaded automatically.")
     print(f"No service restart required - encodings are loaded dynamically.")
+    print(f"\n⚠ NOTE: The current model (robica_2.0) does NOT use target encodings.")
+    print(f"   This script is for reference or future models that may require them.")
 
 
 if __name__ == "__main__":

@@ -31,7 +31,12 @@ if not VERIFY_SSL:
 state_manager = StateManager(mongo_url=MONGO_URL)
 
 # Initialize classifier with state manager (loaded once at startup)
-classifier = TransactionClassifier(state_manager=state_manager)
+# robica_2.0 uses LightGBM with threshold 0.90
+classifier = TransactionClassifier(
+    model_path="classifiers/model_robica_2.0.joblib",
+    threshold=0.90,
+    state_manager=state_manager
+)
 
 # Thread pool for processing transactions
 executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="transaction-worker")
