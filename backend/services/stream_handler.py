@@ -33,8 +33,8 @@ state_manager = StateManager(mongo_url=MONGO_URL)
 # Initialize classifier with state manager (loaded once at startup)
 # robica_2.0 uses LightGBM with threshold 0.90
 classifier = TransactionClassifier(
-    model_path="classifiers/model_robica_2.0.joblib",
-    threshold=0.90,
+    model_path="classifiers/fraud_model_v10_simplified_features.joblib",
+    threshold=0.10,
     state_manager=state_manager
 )
 

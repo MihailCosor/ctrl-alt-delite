@@ -10,7 +10,7 @@ from .state_manager import StateManager
 class TransactionClassifier:
     """Wrapper for the transaction classification model (robica_2.0 LightGBM)."""
     
-    def __init__(self, model_path: str = "classifiers/model_robica_3.0.joblib", 
+    def __init__(self, model_path: str = "classifiers/model_robica_4.0.joblib", 
                  threshold: float = 0.5, 
                  verbose: bool = False,
                  state_manager: Optional[StateManager] = None):
@@ -102,10 +102,22 @@ class TransactionClassifier:
     
     def _extract_features(self, transaction: Dict[str, Any]) -> pd.DataFrame:
         """
-        Extract features from transaction for the robica_2.0 model.
+        Extract SIMPLIFIED features from transaction (robica_4.0 model).
         
-        This follows the feature engineering from robica_2.0.py which uses
-        LightGBM with stateful and static features (no target encodings).
+        Only 11 features are used in EXACT order from robica_4.0.py:
+        1. age
+        2. hour_of_day
+        3. merchant_avg_amt_so_far
+        4. amt
+        5. time_since_last_user_trans
+        6. user_trans_count
+        7. category
+        8. city_pop
+        9. distance_km
+        10. day_of_week
+        11. gender
+        
+        This matches the exact format from robica_4.0.py training data.
         """
         
         # === Extract basic fields ===
@@ -146,110 +158,60 @@ class TransactionClassifier:
         # === Distance calculation ===
         distance_km = float(self._calculate_distance(lat, long, merch_lat, merch_long))
         
-        # === Round number check ===
-        is_amt_round_number = 1 if (amt % 1.0 == 0 and amt > 0) else 0
-        
         # === Stateful features from state manager ===
         if self.state_manager is not None:
             stateful_features = self.state_manager.compute_features(transaction)
             
-            # Extract stateful features
+            # Extract ONLY the 3 stateful features we need for robica_4.0
             time_since_last_user_trans = stateful_features.get('time_since_last_user_trans', 30*24*60*60)
             user_trans_count = stateful_features.get('user_trans_count', 0.0)
-            user_avg_amt_so_far = stateful_features.get('user_avg_amt_so_far', amt)
-            user_max_amt_so_far = stateful_features.get('user_max_amt_so_far', amt)
-            amt_vs_user_avg_ratio = stateful_features.get('amt_vs_user_avg_ratio', 1.0)
-            is_over_user_max_amt = stateful_features.get('is_over_user_max_amt', 0)
-            user_avg_amt_last_5_trans = stateful_features.get('user_avg_amt_last_5_trans', amt)
-            user_merchant_trans_count = stateful_features.get('user_merchant_trans_count', 0.0)
-            is_new_merchant_for_user = stateful_features.get('is_new_merchant_for_user', 0)
-            user_avg_amt_category_so_far = stateful_features.get('user_avg_amt_category_so_far', amt)
-            amt_vs_user_category_avg = stateful_features.get('amt_vs_user_category_avg', 1.0)
-            is_new_state = stateful_features.get('is_new_state', 0)
-            cc_num_count_last_1h = stateful_features.get('cc_num_count_last_1h', 0.0)
-            cc_num_count_last_24h = stateful_features.get('cc_num_count_last_24h', 0.0)
             merchant_avg_amt_so_far = stateful_features.get('merchant_avg_amt_so_far', amt)
-            amt_vs_merchant_avg_ratio = stateful_features.get('amt_vs_merchant_avg_ratio', 1.0)
         else:
             # Fallback to defaults (stateless mode - will produce poor predictions)
             print("⚠ WARNING: StateManager not available, using default stateless features")
             time_since_last_user_trans = float(30*24*60*60)
             user_trans_count = 0.0
-            user_avg_amt_so_far = amt
-            user_max_amt_so_far = amt
-            amt_vs_user_avg_ratio = 1.0
-            is_over_user_max_amt = 0
-            user_avg_amt_last_5_trans = amt
-            user_merchant_trans_count = 0.0
-            is_new_merchant_for_user = 0
-            user_avg_amt_category_so_far = amt
-            amt_vs_user_category_avg = 1.0
-            is_new_state = 0
-            cc_num_count_last_1h = 0.0
-            cc_num_count_last_24h = 0.0
             merchant_avg_amt_so_far = amt
-            amt_vs_merchant_avg_ratio = 1.0
         
-        # === Assemble all features ===
+        # === Assemble features in EXACT order from robica_4.0.py ===
+        # Order: age, hour_of_day, merchant_avg_amt_so_far, amt, time_since_last_user_trans, 
+        #        user_trans_count, category, city_pop, distance_km, day_of_week, gender
         features = {
-            # Static features
-            'amt': amt,
-            'city_pop': city_pop,
             'age': age,
             'hour_of_day': hour_of_day,
-            'day_of_week': day_of_week,
-            'distance_km': distance_km,
-            'is_amt_round_number': is_amt_round_number,
-            'gender': gender,
-            'category': category,
-            
-            # Stateful user features
+            'merchant_avg_amt_so_far': merchant_avg_amt_so_far,
+            'amt': amt,
             'time_since_last_user_trans': time_since_last_user_trans,
             'user_trans_count': user_trans_count,
-            'user_avg_amt_so_far': user_avg_amt_so_far,
-            'user_max_amt_so_far': user_max_amt_so_far,
-            'amt_vs_user_avg_ratio': amt_vs_user_avg_ratio,
-            'is_over_user_max_amt': is_over_user_max_amt,
-            'user_avg_amt_last_5_trans': user_avg_amt_last_5_trans,
-            'is_new_merchant_for_user': is_new_merchant_for_user,
-            'user_avg_amt_category_so_far': user_avg_amt_category_so_far,
-            'amt_vs_user_category_avg': amt_vs_user_category_avg,
-            'is_new_state': is_new_state,
-            
-            # Stateful card features
-            'cc_num_count_last_1h': cc_num_count_last_1h,
-            'cc_num_count_last_24h': cc_num_count_last_24h,
-            
-            # Stateful merchant features
-            'merchant_avg_amt_so_far': merchant_avg_amt_so_far,
-            'amt_vs_merchant_avg_ratio': amt_vs_merchant_avg_ratio
+            'category': category,
+            'city_pop': city_pop,
+            'distance_km': distance_km,
+            'day_of_week': day_of_week,
+            'gender': gender
         }
         
         # Create DataFrame
         df = pd.DataFrame([features])
         
-        # Convert categorical features to proper types
+        # Convert categorical features to proper types (matching robica_4.0.py)
         categorical_features = [
-            'gender', 'category', 'hour_of_day', 'day_of_week',
-            'is_over_user_max_amt', 'is_new_merchant_for_user',
-            'is_new_state', 'is_amt_round_number'
+            'category', 'hour_of_day', 'day_of_week', 'gender'
         ]
         
         for col in categorical_features:
             if col in df.columns:
+                # Ensure correct type before converting to category (matching robica_4.0.py lines 158-162)
                 if df[col].dtype == 'object':
                     df[col] = df[col].astype(str)
+                elif not pd.api.types.is_categorical_dtype(df[col]):  # Handle numerical types intended as categorical
+                    df[col] = df[col].astype(str)  # Convert to string first
                 df[col] = df[col].astype('category')
         
         # Ensure numeric columns are float
         numeric_cols = [
-            'amt', 'city_pop', 'age', 'distance_km',
+            'age', 'merchant_avg_amt_so_far', 'amt',
             'time_since_last_user_trans', 'user_trans_count',
-            'user_avg_amt_so_far', 'user_max_amt_so_far',
-            'amt_vs_user_avg_ratio', 'user_avg_amt_last_5_trans',
-            'user_avg_amt_category_so_far', 'amt_vs_user_category_avg',
-            'cc_num_count_last_1h', 'cc_num_count_last_24h',
-            'merchant_avg_amt_so_far', 'amt_vs_merchant_avg_ratio'
+            'city_pop', 'distance_km'
         ]
         
         for col in numeric_cols:
