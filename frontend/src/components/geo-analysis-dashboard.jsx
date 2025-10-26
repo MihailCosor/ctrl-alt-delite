@@ -31,7 +31,7 @@ const STATE_NAMES = {
   'DC': 'District of Columbia'
 };
 
-export function GeoAnalysisDashboard() {
+export function GeoAnalysisDashboard({ globalFilters }) {
   const [geoData, setGeoData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -39,7 +39,14 @@ export function GeoAnalysisDashboard() {
   const fetchGeoData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/transactions/geo-analysis');
+      // Build query parameters from global filters
+      const params = new URLSearchParams();
+      if (globalFilters?.startDate) params.append('startDate', globalFilters.startDate);
+      if (globalFilters?.endDate) params.append('endDate', globalFilters.endDate);
+      if (globalFilters?.startTime) params.append('startTime', globalFilters.startTime);
+      if (globalFilters?.endTime) params.append('endTime', globalFilters.endTime);
+
+      const response = await fetch(`/api/transactions/geo-analysis?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setGeoData(data);
@@ -61,6 +68,13 @@ export function GeoAnalysisDashboard() {
     const interval = setInterval(fetchGeoData, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Refetch data when global filters change
+  useEffect(() => {
+    if (globalFilters) {
+      fetchGeoData();
+    }
+  }, [globalFilters]);
 
   if (loading) {
     return (

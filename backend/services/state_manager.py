@@ -307,8 +307,8 @@ class StateManager:
         
         # 3. user_avg_amt_so_far
         if user_prev_trans:
-            amounts = [t.get('amt', 0) for t in user_prev_trans if t.get('amt') is not None]
-            if amounts:
+            amounts = [float(t.get('amt', 0)) for t in user_prev_trans if t.get('amt') is not None and t.get('amt') != '']
+            if amounts and len(amounts) > 0:
                 features['user_avg_amt_so_far'] = float(sum(amounts) / len(amounts))
             else:
                 features['user_avg_amt_so_far'] = float(amt)
@@ -317,8 +317,8 @@ class StateManager:
         
         # 4. user_max_amt_so_far
         if user_prev_trans:
-            amounts = [t.get('amt', 0) for t in user_prev_trans if t.get('amt') is not None]
-            if amounts:
+            amounts = [float(t.get('amt', 0)) for t in user_prev_trans if t.get('amt') is not None and t.get('amt') != '']
+            if amounts and len(amounts) > 0:
                 features['user_max_amt_so_far'] = float(max(amounts))
             else:
                 features['user_max_amt_so_far'] = float(amt)
@@ -340,8 +340,8 @@ class StateManager:
         # 7. user_avg_amt_last_5_trans
         last_5_trans = user_prev_trans[-5:] if len(user_prev_trans) >= 5 else user_prev_trans
         if last_5_trans:
-            amounts = [t.get('amt', 0) for t in last_5_trans if t.get('amt') is not None]
-            if amounts:
+            amounts = [float(t.get('amt', 0)) for t in last_5_trans if t.get('amt') is not None and t.get('amt') != '']
+            if amounts and len(amounts) > 0:
                 features['user_avg_amt_last_5_trans'] = float(sum(amounts) / len(amounts))
             else:
                 features['user_avg_amt_last_5_trans'] = float(amt)
@@ -358,8 +358,8 @@ class StateManager:
         # 10. user_avg_amt_category_so_far
         user_category_trans = [t for t in user_prev_trans if t.get('category') == category]
         if user_category_trans:
-            amounts = [t.get('amt', 0) for t in user_category_trans if t.get('amt') is not None]
-            if amounts:
+            amounts = [float(t.get('amt', 0)) for t in user_category_trans if t.get('amt') is not None and t.get('amt') != '']
+            if amounts and len(amounts) > 0:
                 cat_avg = sum(amounts) / len(amounts)
                 features['user_avg_amt_category_so_far'] = float(cat_avg)
                 # 11. amt_vs_user_category_avg
@@ -425,8 +425,8 @@ class StateManager:
         
         # 15. merchant_avg_amt_so_far
         if merchant_prev_trans:
-            amounts = [t.get('amt', 0) for t in merchant_prev_trans if t.get('amt') is not None]
-            if amounts:
+            amounts = [float(t.get('amt', 0)) for t in merchant_prev_trans if t.get('amt') is not None and t.get('amt') != '']
+            if amounts and len(amounts) > 0:
                 features['merchant_avg_amt_so_far'] = float(sum(amounts) / len(amounts))
             else:
                 features['merchant_avg_amt_so_far'] = float(amt)

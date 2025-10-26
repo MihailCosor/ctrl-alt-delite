@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 import pymongo
 from pymongo import MongoClient
+from datetime import datetime
 
 load_dotenv()
 
@@ -68,20 +69,28 @@ def flag_transaction(trans_num, flag_value):
         return None
 
 
-def save_transaction(db_collection, transaction, classification):
+def save_transaction(db_collection, db_aux_collection, transaction, classification):
     """Save transaction to MongoDB (synchronous)."""
     try:
+        timestamp = datetime.now(timezone.utc)
         doc = {
-            "transaction": transaction,
-            "classification": classification,
-            "processed_at": datetime.now(timezone.utc)
+            **transaction,
+            "_loaded_at": timestamp
         }
         db_collection.insert_one(doc)
+
+        aux_doc = {
+            "transaction": transaction,
+            "classification": classification,
+            "processed_at": timestamp
+        }
+        db_aux_collection.insert_one(aux_doc)
+
     except Exception as e:
         print(f"Error saving transaction: {e}")
 
 
-def process_single_transaction(transaction, db_collection):
+def process_single_transaction(transaction, db_collection, db_aux_collection):
     """
     Process a single transaction in a worker thread.
     
@@ -106,7 +115,7 @@ def process_single_transaction(transaction, db_collection):
         ).start()
         
         # Save to database
-        save_transaction(db_collection, transaction, classification_value)
+        save_transaction(db_collection, db_aux_collection, transaction, classification_value)
         
         # Update state for future transactions
         state_manager.update_state(transaction)
@@ -133,7 +142,8 @@ def handle_transaction_from_stream_sync(mongo_url):
     # Create synchronous MongoDB connection
     mongo_client = MongoClient(mongo_url)
     database = mongo_client.transaction_classifier
-    db_collection = database.transactions
+    db_collection = database.training_data
+    db_aux_collection = database.transactions
     
     try:
         print("Initiating SSE stream connection...")
@@ -169,7 +179,7 @@ def handle_transaction_from_stream_sync(mongo_url):
                     print(json.dumps(transaction, indent=2))
                     
                     # Submit transaction to thread pool for processing
-                    executor.submit(process_single_transaction, transaction, db_collection)
+                    executor.submit(process_single_transaction, transaction, db_collection, db_aux_collection)
                     
                 except json.JSONDecodeError as e:
                     print(f"Error decoding transaction data: {e}")

@@ -11,7 +11,13 @@ import {
   Clock, 
   Database,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  Brain,
+  Zap,
+  Eye,
+  Lock,
+  TrendingUp,
+  Target
 } from 'lucide-react';
 
 export function TransactionDashboard() {
@@ -162,6 +168,134 @@ export function TransactionDashboard() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Business Overview */}
+      <div className="mt-12">
+        <div className="max-w-7xl mx-auto px-4">
+              {/* Header */}
+              <div className="flex flex-row items-center justify-center mb-12">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center justify-center w-12 h-12">
+                    <img
+                      src="/icon.png"
+                      alt="Hive Guard Logo"
+                      className="w-10 h-10 object-contain"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'block';
+                      }}
+                    />
+                    <ShieldCheck className="h-8 w-8 text-blue-600 hidden" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Hive Guard Platform</h3>
+                    <p className="text-slate-600 dark:text-slate-400 text-sm">
+                      Advanced fraud detection system with real-time monitoring
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Content */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+                {/* Purpose */}
+                <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center mb-4">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg mr-3">
+                      <ShieldCheck className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100">Protection</h4>
+                  </div>
+                  <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Real-time fraud detection
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Transaction monitoring
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Risk assessment
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Business Value */}
+                <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center mb-4">
+                    <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg mr-3">
+                      <TrendingUp className="h-5 w-5 text-green-600" />
+                    </div>
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100">Value</h4>
+                  </div>
+                  <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Reduce losses
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Build trust
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Stay compliant
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Core Features */}
+                <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center mb-4">
+                    <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg mr-3">
+                      <Activity className="h-5 w-5 text-purple-600" />
+                    </div>
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100">Technology</h4>
+                  </div>
+                  <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Machine learning
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Geographic analysis
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Auto alerts
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Usability */}
+                <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center mb-4">
+                    <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg mr-3">
+                      <Eye className="h-5 w-5 text-indigo-600" />
+                    </div>
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100">Usability</h4>
+                  </div>
+                  <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Intuitive interface
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Easy setup
+                    </li>
+                    <li className="flex items-start">
+                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                      Seamless integration
+                    </li>
+                  </ul>
+                </div>
+              </div>
+        </div>
       </div>
 
     </div>

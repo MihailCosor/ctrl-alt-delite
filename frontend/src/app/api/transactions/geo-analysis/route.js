@@ -1,14 +1,36 @@
 import { NextResponse } from 'next/server';
 import { getTransactionsCollection } from '@/lib/mongodb';
 
-export async function GET() {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+    const startTime = searchParams.get('startTime');
+    const endTime = searchParams.get('endTime');
+
     const collection = await getTransactionsCollection();
+
+    // Build date filter
+    let dateFilter = {};
+    if (startDate && endDate && startTime && endTime) {
+      const startDateTime = new Date(`${startDate}T${startTime}:00`);
+      const endDateTime = new Date(`${endDate}T${endTime}:00`);
+      dateFilter = {
+        processed_at: {
+          $gte: startDateTime,
+          $lte: endDateTime
+        }
+      };
+    }
     
     // Get top 10 cities with fraud
     const topCitiesWithFraud = await collection.aggregate([
       {
-        $match: { classification: 1 } // Only fraud transactions
+        $match: { 
+          classification: 1, // Only fraud transactions
+          ...dateFilter
+        }
       },
       {
         $group: {
@@ -39,7 +61,10 @@ export async function GET() {
     // Get top 10 countries/states with fraud (using state as country for this dataset)
     const topCountriesWithFraud = await collection.aggregate([
       {
-        $match: { classification: 1 } // Only fraud transactions
+        $match: { 
+          classification: 1, // Only fraud transactions
+          ...dateFilter
+        }
       },
       {
         $group: {
@@ -68,7 +93,10 @@ export async function GET() {
     // Get all countries/states that had fraud for map coloring
     const fraudCountries = await collection.aggregate([
       {
-        $match: { classification: 1 }
+        $match: { 
+          classification: 1,
+          ...dateFilter
+        }
       },
       {
         $group: {
