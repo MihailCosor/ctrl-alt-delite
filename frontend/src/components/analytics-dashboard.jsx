@@ -13,7 +13,8 @@ import {
   TrendingUp,
   Users,
   DollarSign,
-  Target
+  Target,
+  Clock
 } from 'lucide-react';
 
 // Enhanced color palette for charts
@@ -126,8 +127,248 @@ function PieChartComponent({ data, title, colors = CHART_COLORS }) {
   );
 }
 
-// Bar Chart Component
-function BarChartComponent({ data, title, colors = CHART_COLORS }) {
+// Fraud Victim Profile Component
+function FraudVictimProfile({ data }) {
+  if (!data?.ageDemographics || data.ageDemographics.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-slate-500">
+        <div className="text-center">
+          <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+          <p>No data available</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Find highest risk age group
+  const highestRisk = data.ageDemographics.reduce((max, current) => 
+    (current.fraudProbability || 0) > (max.fraudProbability || 0) ? current : max
+  );
+
+  // Find most common fraud category
+  const topCategory = data.fraudCategories?.[0];
+
+  // Calculate average fraud amount
+  const avgFraudAmount = data.ageDemographics.reduce((sum, item) => 
+    sum + (item.fraudAmount || 0), 0
+  ) / data.ageDemographics.reduce((sum, item) => 
+    sum + (item.fraudTransactions || 0), 0
+  ) || 0;
+
+  // Calculate risk patterns
+  const totalFraudTransactions = data.ageDemographics.reduce((sum, item) => 
+    sum + (item.fraudTransactions || 0), 0
+  );
+  const totalTransactions = data.ageDemographics.reduce((sum, item) => 
+    sum + (item.totalTransactions || 0), 0
+  );
+  const overallFraudRate = totalTransactions > 0 ? (totalFraudTransactions / totalTransactions * 100) : 0;
+
+  // Amount range analysis (if available)
+  const amountRanges = data.amountRanges || [];
+  const highValueFraud = amountRanges.find(range => 
+    range.range?.includes('1K') || range.range?.includes('5K') || range.range?.includes('10K')
+  );
+
+  // Time pattern analysis
+  const timePatterns = data.timePatterns || [];
+  const peakFraudTime = timePatterns[0]; // Most common fraud time
+  const totalFraudByTime = timePatterns.reduce((sum, pattern) => sum + pattern.fraudCount, 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Risk Level Badge */}
+      <div className="text-center">
+        <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-bold ${
+          (highestRisk.fraudProbability || 0) >= 15 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' :
+          (highestRisk.fraudProbability || 0) >= 10 ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
+          (highestRisk.fraudProbability || 0) >= 5 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300' :
+          'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+        }`}>
+          <AlertTriangle className="h-4 w-4 mr-2" />
+          {highestRisk.fraudProbability || 0}% Fraud Risk
+        </div>
+      </div>
+
+      {/* Profile Characteristics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Age Group */}
+        <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+          <div className="flex items-center mb-2">
+            <Users className="h-4 w-4 text-slate-600 mr-2" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Most Vulnerable Age</span>
+          </div>
+          <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            {highestRisk.ageRange}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {highestRisk.fraudTransactions || 0} fraud cases
+          </div>
+        </div>
+
+        {/* Transaction Category */}
+        <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+          <div className="flex items-center mb-2">
+            <Target className="h-4 w-4 text-slate-600 mr-2" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Top Target Category</span>
+          </div>
+          <div className="text-lg font-bold text-slate-900 dark:text-slate-100 capitalize">
+            {topCategory?.category?.replace('_', ' ') || 'N/A'}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {topCategory?.count || 0} fraud cases
+          </div>
+        </div>
+
+        {/* Average Loss */}
+        <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+          <div className="flex items-center mb-2">
+            <DollarSign className="h-4 w-4 text-slate-600 mr-2" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Average Loss</span>
+          </div>
+          <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            ${avgFraudAmount.toFixed(2)}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Per fraud incident
+          </div>
+        </div>
+
+        {/* Overall Fraud Rate */}
+        <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+          <div className="flex items-center mb-2">
+            <AlertTriangle className="h-4 w-4 text-slate-600 mr-2" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Overall Fraud Rate</span>
+          </div>
+          <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            {overallFraudRate.toFixed(2)}%
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Across all age groups
+          </div>
+        </div>
+
+        {/* High Value Fraud */}
+        <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+          <div className="flex items-center mb-2">
+            <TrendingUp className="h-4 w-4 text-slate-600 mr-2" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">High Value Fraud</span>
+          </div>
+          <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            {highValueFraud?.count || 0}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {highValueFraud?.range || 'No data'} transactions
+          </div>
+        </div>
+
+
+        {/* Total Impact */}
+        <div className="bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+          <div className="flex items-center mb-2">
+            <DollarSign className="h-4 w-4 text-slate-600 mr-2" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Total Impact</span>
+          </div>
+          <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            ${highestRisk.fraudAmount?.toFixed(2) || '0.00'}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            In highest risk group
+          </div>
+        </div>
+      </div>
+
+      {/* Risk Insights */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">Risk Insights & Behavioral Patterns</h4>
+        <ul className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
+          <li>• <strong>{highestRisk.ageRange}</strong> age group shows highest fraud susceptibility ({highestRisk.fraudProbability?.toFixed(1)}%)</li>
+          <li>• <strong>{topCategory?.category?.replace('_', ' ')}</strong> transactions are most targeted ({topCategory?.count || 0} cases)</li>
+          <li>• Average loss per incident: <strong>${avgFraudAmount.toFixed(2)}</strong></li>
+          <li>• Overall fraud rate across all demographics: <strong>{overallFraudRate.toFixed(2)}%</strong></li>
+          {highValueFraud && (
+            <li>• High-value fraud (${highValueFraud.range}): <strong>{highValueFraud.count} cases</strong></li>
+          )}
+          <li>• Focus protection efforts on {highestRisk.ageRange} demographic</li>
+          <li>• Monitor {topCategory?.category?.replace('_', ' ')} transactions more closely</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Time Pattern Table Component
+function TimePatternTable({ data, title, colors = CHART_COLORS }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-slate-500">
+        <div className="text-center">
+          <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
+          <p>No time data available</p>
+        </div>
+      </div>
+    );
+  }
+
+  const sortedData = [...data].sort((a, b) => b.fraudCount - a.fraudCount);
+
+  return (
+    <div className="w-full">
+      <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+        {/* Table Header */}
+        <div className="bg-slate-50 dark:bg-slate-700 px-6 py-3 border-b border-slate-200 dark:border-slate-600">
+          <div className="grid grid-cols-3 gap-4 text-sm font-semibold text-slate-700 dark:text-slate-300">
+            <div>Time</div>
+            <div>Fraud Cases</div>
+            <div>Risk Level</div>
+          </div>
+        </div>
+        
+        {/* Table Body */}
+        <div className="divide-y divide-slate-200 dark:divide-slate-600">
+          {sortedData.slice(0, 12).map((item, index) => {
+            const riskLevel = item.fraudCount > 5 ? 'High' : item.fraudCount > 2 ? 'Medium' : 'Low';
+            const riskColor = riskLevel === 'High' ? 'text-red-600 bg-red-50 dark:bg-red-900/20' : 
+                             riskLevel === 'Medium' ? 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20' : 
+                             'text-green-600 bg-green-50 dark:bg-green-900/20';
+            
+            return (
+              <div key={index} className="px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className="grid grid-cols-3 gap-4 items-center">
+                  {/* Time */}
+                  <div className="flex items-center space-x-2">
+                    <Clock className="h-4 w-4 text-slate-500" />
+                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      {item.hour}:00
+                    </span>
+                  </div>
+                  
+                  {/* Fraud Count */}
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {item.fraudCount} cases
+                    </span>
+                  </div>
+                  
+                  {/* Risk Level */}
+                  <div className="flex justify-start">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${riskColor}`}>
+                      {riskLevel}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Horizontal Bar Chart Component for Age Demographics
+function HorizontalBarChart({ data, title, colors = CHART_COLORS }) {
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-slate-500">
@@ -139,78 +380,125 @@ function BarChartComponent({ data, title, colors = CHART_COLORS }) {
     );
   }
 
-  const maxCount = Math.max(...data.map(item => item.count));
+  const maxCount = Math.max(...data.map(item => item.fraudProbability || item.count));
 
   return (
-    <div className="w-full h-80">
-      {/* Chart Container with Background */}
-      <div className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-xl p-4 mb-4">
-        {/* Y-axis Grid Lines */}
-        <div className="relative h-48 mb-4">
-          {/* Grid lines */}
-          {[0, 25, 50, 75, 100].map((value) => (
-            <div
-              key={value}
-              className="absolute w-full border-t border-slate-200 dark:border-slate-600 opacity-30"
-              style={{ bottom: `${value}%` }}
-            />
-          ))}
-          
-          {/* Y-axis labels */}
-          <div className="absolute -left-8 top-0 h-full flex flex-col justify-between text-xs text-slate-500 dark:text-slate-400">
-            <span>{maxCount}</span>
-            <span>{Math.round(maxCount * 0.75)}</span>
-            <span>{Math.round(maxCount * 0.5)}</span>
-            <span>{Math.round(maxCount * 0.25)}</span>
-            <span>0</span>
-          </div>
-          
-          {/* Bars */}
-          <div className="h-full flex items-end justify-between space-x-2 ml-4">
-            {data.map((item, index) => {
-              const height = (item.count / maxCount) * 100;
-              return (
-                <div key={index} className="flex flex-col items-center flex-1 group">
-                  {/* Bar with gradient */}
-                  <div 
-                    className="w-full rounded-t-lg transition-all duration-300 hover:opacity-90 cursor-pointer relative shadow-sm hover:shadow-md"
-                    style={{ 
-                      height: `${Math.max(height, 8)}%`,
-                      background: `linear-gradient(135deg, ${colors[index % colors.length]}, ${colors[index % colors.length]}dd)`,
-                      minHeight: '8px'
-                    }}
-                    title={`${item.ageRange || item.range}: ${item.count} frauds`}
-                  >
-                    {/* Value on top of bar */}
-                    <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 text-xs font-bold text-slate-700 dark:text-slate-300 opacity-0 group-hover:opacity-100 transition-all duration-200 bg-white dark:bg-slate-800 px-2 py-1 rounded shadow-sm">
-                      {item.count}
-                    </div>
-                    
-                    {/* Shine effect */}
-                    <div className="absolute inset-0 rounded-t-lg bg-gradient-to-t from-transparent to-white opacity-20" />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-      
-      {/* Enhanced X-axis Labels */}
-      <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-3">
-        <div className="flex justify-between space-x-2">
-          {data.map((item, index) => (
-            <div key={index} className="flex-1 text-center p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-              <div className="text-sm text-slate-700 dark:text-slate-300 font-semibold">
+    <div className="w-full space-y-4">
+      {data.map((item, index) => {
+        const value = item.fraudProbability || item.count;
+        const width = (value / maxCount) * 100;
+        
+        return (
+          <div key={index} className="group">
+            {/* Age Range Label */}
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 {item.ageRange || item.range}
+              </span>
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                {value}%
+              </span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="relative w-full h-6 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden"
+                style={{ 
+                  width: `${Math.max(width, 5)}%`,
+                  background: `linear-gradient(90deg, ${colors[index % colors.length]}, ${colors[index % colors.length]}dd)`
+                }}
+              >
+                {/* Shine effect */}
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 animate-pulse" />
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {item.count} cases
+              
+              {/* Value label on bar */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-xs font-bold text-white drop-shadow-sm">
+                  {value}%
+                </span>
               </div>
             </div>
-          ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Transaction Volume Chart for Age Demographics
+function TransactionVolumeChart({ data, title, colors = CHART_COLORS }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-slate-500">
+        <div className="text-center">
+          <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+          <p>No data available</p>
         </div>
       </div>
+    );
+  }
+
+  const maxTotal = Math.max(...data.map(item => item.totalTransactions || 0));
+
+  return (
+    <div className="w-full space-y-3">
+      {data.map((item, index) => {
+        const total = item.totalTransactions || 0;
+        const fraud = item.fraudTransactions || 0;
+        const normal = item.normalTransactions || 0;
+        const totalWidth = (total / maxTotal) * 100;
+        const fraudWidth = total > 0 ? (fraud / total) * totalWidth : 0;
+        
+        return (
+          <div key={index} className="group">
+            {/* Age Range Label */}
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                {item.ageRange || item.range}
+              </span>
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                {total} total
+              </span>
+            </div>
+            
+            {/* Stacked Bar */}
+            <div className="relative w-full h-6 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+              {/* Normal transactions (bottom) */}
+              <div
+                className="absolute left-0 top-0 h-full rounded-full"
+                style={{ 
+                  width: `${Math.max(totalWidth, 5)}%`,
+                  background: `linear-gradient(90deg, ${colors[index % colors.length]}40, ${colors[index % colors.length]}60)`
+                }}
+              />
+              
+              {/* Fraud transactions (top) */}
+              <div
+                className="absolute left-0 top-0 h-full rounded-full"
+                style={{ 
+                  width: `${Math.max(fraudWidth, 2)}%`,
+                  background: `linear-gradient(90deg, ${colors[index % colors.length]}, ${colors[index % colors.length]}dd)`
+                }}
+              />
+              
+              {/* Value labels */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-xs font-bold text-slate-900 dark:text-slate-100 drop-shadow-sm">
+                  {fraud}/{total}
+                </span>
+              </div>
+            </div>
+            
+            {/* Legend */}
+            <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-1">
+              <span>Normal: {normal}</span>
+              <span>Fraud: {fraud}</span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -362,6 +650,30 @@ export function AnalyticsDashboard({ globalFilters }) {
 
       {/* Charts */}
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Fraud Victim Profile */}
+        <Card className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <CardHeader className="border-b border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl text-slate-900 dark:text-slate-100 flex items-center">
+                  <Users className="h-6 w-6 text-purple-600 mr-3" />
+                  Fraud Victim Profile
+                </CardTitle>
+                <CardDescription className="text-slate-600 dark:text-slate-400">
+                  Characteristics of most targeted victims
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchAnalyticsData} className="border-slate-300 dark:border-slate-600">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <FraudVictimProfile data={analyticsData} />
+          </CardContent>
+        </Card>
+
         {/* Fraud Categories Pie Chart */}
         <Card className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
           <CardHeader className="border-b border-slate-200 dark:border-slate-700">
@@ -389,8 +701,12 @@ export function AnalyticsDashboard({ globalFilters }) {
           </CardContent>
         </Card>
 
-        {/* Age Demographics Bar Chart */}
-        <Card className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+      </div>
+
+      {/* Age Analysis Row - SIDE BY SIDE */}
+      <div className="mt-6 flex flex-col lg:flex-row gap-6">
+        {/* Age Demographics */}
+        <Card className="flex-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
           <CardHeader className="border-b border-slate-200 dark:border-slate-700">
             <div className="flex items-center justify-between">
               <div>
@@ -399,7 +715,7 @@ export function AnalyticsDashboard({ globalFilters }) {
                   Age Demographics
                 </CardTitle>
                 <CardDescription className="text-slate-600 dark:text-slate-400">
-                  Fraud victims by age group
+                  Fraud probability by age group
                 </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={fetchAnalyticsData} className="border-slate-300 dark:border-slate-600">
@@ -409,9 +725,65 @@ export function AnalyticsDashboard({ globalFilters }) {
             </div>
           </CardHeader>
           <CardContent className="p-6">
-            <BarChartComponent 
+            <HorizontalBarChart 
               data={analyticsData?.ageDemographics || []} 
               title="Age Demographics"
+            />
+          </CardContent>
+        </Card>
+
+        {/* Transaction Volume by Age */}
+        <Card className="flex-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <CardHeader className="border-b border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl text-slate-900 dark:text-slate-100 flex items-center">
+                  <BarChart3 className="h-6 w-6 text-purple-600 mr-3" />
+                  Transaction Volume by Age
+                </CardTitle>
+                <CardDescription className="text-slate-600 dark:text-slate-400">
+                  Total transactions vs fraud cases by age group
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchAnalyticsData} className="border-slate-300 dark:border-slate-600">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <TransactionVolumeChart 
+              data={analyticsData?.ageDemographics || []} 
+              title="Transaction Volume by Age"
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Time Pattern Analysis */}
+      <div className="mt-6">
+        <Card className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <CardHeader className="border-b border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl text-slate-900 dark:text-slate-100 flex items-center">
+                  <Clock className="h-6 w-6 text-orange-600 mr-3" />
+                  Fraud Time Patterns
+                </CardTitle>
+                <CardDescription className="text-slate-600 dark:text-slate-400">
+                  Fraud transactions per hour of the day
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchAnalyticsData} className="border-slate-300 dark:border-slate-600">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <TimePatternTable 
+              data={analyticsData?.timePatterns || []} 
+              title="Fraud Time Patterns"
             />
           </CardContent>
         </Card>

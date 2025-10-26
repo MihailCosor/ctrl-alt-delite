@@ -52,14 +52,8 @@ export async function GET(request) {
       }
     ]).toArray();
 
-    // Get age demographics data
+    // Get age demographics data with fraud probabilities
     const ageDemographics = await collection.aggregate([
-      {
-        $match: { 
-          classification: 1, // Only fraud transactions
-          ...dateFilter
-        }
-      },
       {
         $addFields: {
           age: {
@@ -73,13 +67,34 @@ export async function GET(request) {
         }
       },
       {
+        $match: {
+          ...dateFilter,
+          age: { $gte: 0, $lte: 120 } // Filter out invalid ages
+        }
+      },
+      {
         $bucket: {
           groupBy: "$age",
           boundaries: [0, 18, 25, 35, 45, 55, 65, 100],
           default: "Unknown",
           output: {
-            count: { $sum: 1 },
+            totalTransactions: { $sum: 1 },
+            fraudTransactions: {
+              $sum: { $cond: [{ $eq: ["$classification", 1] }, 1, 0] }
+            },
+            normalTransactions: {
+              $sum: { $cond: [{ $eq: ["$classification", 0] }, 1, 0] }
+            },
             totalAmount: { $sum: { $toDouble: "$transaction.amt" } },
+            fraudAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$classification", 1] },
+                  { $toDouble: "$transaction.amt" },
+                  0
+                ]
+              }
+            },
             avgAge: { $avg: "$age" }
           }
         }
@@ -102,13 +117,27 @@ export async function GET(request) {
               default: "Unknown"
             }
           },
-          count: 1,
+          totalTransactions: 1,
+          fraudTransactions: 1,
+          normalTransactions: 1,
+          fraudProbability: {
+            $round: [
+              {
+                $multiply: [
+                  { $divide: ["$fraudTransactions", "$totalTransactions"] },
+                  100
+                ]
+              },
+              2
+            ]
+          },
           totalAmount: { $round: ["$totalAmount", 2] },
+          fraudAmount: { $round: ["$fraudAmount", 2] },
           avgAge: { $round: ["$avgAge", 1] }
         }
       },
       {
-        $sort: { count: -1 }
+        $sort: { fraudProbability: -1 }
       }
     ]).toArray();
 
@@ -260,11 +289,61 @@ export async function GET(request) {
       }
     ]).toArray();
 
+    // Get time-based fraud patterns
+    const timePatterns = await collection.aggregate([
+      {
+        $addFields: {
+          hour: { $hour: "$processed_at" },
+          dayOfWeek: { $dayOfWeek: "$processed_at" }
+        }
+      },
+      {
+        $match: {
+          classification: 1, // Only fraud transactions
+          ...dateFilter
+        }
+      },
+      {
+        $group: {
+          _id: {
+            hour: "$hour",
+            dayOfWeek: "$dayOfWeek"
+          },
+          fraudCount: { $sum: 1 },
+          totalAmount: { $sum: { $toDouble: "$transaction.amt" } }
+        }
+      },
+      {
+        $sort: { fraudCount: -1 }
+      },
+      {
+        $limit: 10
+      },
+      {
+        $project: {
+          _id: 0,
+          hour: "$_id.hour",
+          dayOfWeek: "$_id.dayOfWeek",
+          fraudCount: 1,
+          totalAmount: { $round: ["$totalAmount", 2] },
+          timeLabel: {
+            $concat: [
+              { $toString: "$_id.hour" },
+              ":00 - ",
+              { $toString: { $add: ["$_id.hour", 1] } },
+              ":00"
+            ]
+          }
+        }
+      }
+    ]).toArray();
+
     return NextResponse.json({
       fraudCategories,
       ageDemographics,
       merchantStats,
       amountRanges,
+      timePatterns,
       timestamp: new Date().toISOString()
     });
   } catch (error) {

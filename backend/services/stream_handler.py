@@ -35,7 +35,7 @@ state_manager = StateManager(mongo_url=MONGO_URL)
 # robica_2.0 uses LightGBM with threshold 0.90
 classifier = TransactionClassifier(
     model_path="classifiers/fraud_model_v10_simplified_features.joblib",
-    threshold=0.10,
+    threshold=0.50,
     state_manager=state_manager
 )
 
@@ -45,17 +45,30 @@ executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="trans
 def flag_transaction(trans_num, flag_value):
     """Flag a transaction with the given classification value (fire-and-forget in separate thread)."""
     try:
-        payload = {"trans_num": trans_num, "flag_value": flag_value}
-        response = requests.post(
-            FLAG_URL, 
-            headers=headers, 
-            json=payload, 
-            timeout=2.0, 
-            verify=VERIFY_SSL
-        )
-        response.raise_for_status()
-        print(f"  ↳ Flagged {trans_num} = {flag_value}")
-        return response.json()
+        # Try different payload formats that might be expected
+        payload_formats = [
+            {"trans_num": trans_num, "flag_value": flag_value},
+        ]
+        
+        for i, payload in enumerate(payload_formats):
+            print(f"   📤 Trying payload format {i+1}: {payload}")
+            try:
+                response = requests.post(
+                    FLAG_URL, 
+                    headers=headers, 
+                    json=payload, 
+                    timeout=10.0, 
+                    verify=VERIFY_SSL
+                )
+                response.raise_for_status()
+                print(f"  ✅ Success with format {i+1}: {payload}")
+                print(f"  ↳ Flagged {trans_num} = {flag_value}")
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                if i == len(payload_formats) - 1:  # Last attempt
+                    raise e
+                print(f"   ❌ Format {i+1} failed: {e}")
+                continue
     except requests.exceptions.Timeout:
         # Silently continue on timeout - this is fire-and-forget
         return None
@@ -63,6 +76,13 @@ def flag_transaction(trans_num, flag_value):
         # Only log non-timeout errors
         if "timeout" not in str(e).lower():
             print(f"⚠ HTTP error flagging {trans_num}: {e}")
+            # Try to get more details from the response
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_details = e.response.text
+                    print(f"   Response body: {error_details}")
+                except:
+                    pass
         return None
     except Exception as e:
         print(f"⚠ Error flagging {trans_num}: {e}")
@@ -77,7 +97,7 @@ def save_transaction(db_collection, db_aux_collection, transaction, classificati
             **transaction,
             "_loaded_at": timestamp
         }
-        db_collection.insert_one(doc)
+        # db_collection.insert_one(doc)
 
         aux_doc = {
             "transaction": transaction,
@@ -129,6 +149,7 @@ def handle_transaction_from_stream_sync(mongo_url):
     """
     Connect to SSE stream and process transactions using threading.
     This runs in a single background thread started by FastAPI.
+        Includes automatic reconnection on timeout/failure.
     """
     import time
     time.sleep(1)  # Brief delay to ensure app is ready
@@ -145,56 +166,86 @@ def handle_transaction_from_stream_sync(mongo_url):
     db_collection = database.training_data
     db_aux_collection = database.transactions
     
-    try:
-        print("Initiating SSE stream connection...")
-        response = requests.get(STREAM_URL, headers=headers, stream=True, timeout=30, verify=VERIFY_SSL)
-        print(f"Stream response status: {response.status_code}")
-        response.raise_for_status()
-        
-        client = SSEClient(response)
-        print("✓ Successfully connected to transaction stream!")
-        print("Listening for transaction events...")
-        
-        event_count = 0
-        
-        for event in client.events():
-            event_count += 1
-            if event_count % 50 == 0:
-                print(f"[Stats] Received {event_count} events")
+    reconnect_attempts = 0
+    max_reconnect_attempts = 10
+    reconnect_delay = 5  # seconds
+    
+    while reconnect_attempts < max_reconnect_attempts:
+        try:
+            if reconnect_attempts > 0:
+                print(f"🔄 Reconnection attempt {reconnect_attempts}/{max_reconnect_attempts}")
+                print(f"⏳ Waiting {reconnect_delay} seconds before retry...")
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, 60)  # Exponential backoff, max 60s
             
-            if event.data:
-                try:
-                    transaction = json.loads(event.data)
-                    # calc unix time based on trans_date and trans_time
-                    trans_date = transaction.get('trans_date')
-                    trans_time = transaction.get('trans_time')
-                    if trans_date and trans_time:
-                        transaction['unix_time'] = int(time.mktime(time.strptime(f"{trans_date} {trans_time}", "%Y-%m-%d %H:%M:%S")))
-                    else:
-                        transaction['unix_time'] = 0
+            print("Initiating SSE stream connection...")
+            # Increased timeout and added connection timeout
+            response = requests.get(
+                STREAM_URL, 
+                headers=headers, 
+                stream=True, 
+                timeout=(10, 300),  # (connect_timeout, read_timeout) - 5 min read timeout
+                verify=VERIFY_SSL
+            )
+            print(f"Stream response status: {response.status_code}")
+            response.raise_for_status()
+            
+            client = SSEClient(response)
+            print("✓ Successfully connected to transaction stream!")
+            print("Listening for transaction events...")
+            
+            event_count = 0
+            reconnect_attempts = 0  # Reset on successful connection
+            reconnect_delay = 5  # Reset delay
+            
+            for event in client.events():
+                event_count += 1
+                if event_count % 50 == 0:
+                    print(f"[Stats] Received {event_count} events")
+                
+                if event.data:
+                    try:
+                        transaction = json.loads(event.data)
+                        # calc unix time based on trans_date and trans_time
+                        trans_date = transaction.get('trans_date')
+                        trans_time = transaction.get('trans_time')
+                        if trans_date and trans_time:
+                            transaction['unix_time'] = int(time.mktime(time.strptime(f"{trans_date} {trans_time}", "%Y-%m-%d %H:%M:%S")))
+                        else:
+                            transaction['unix_time'] = 0
 
-                    trans_num = transaction.get('trans_num')
-                    print(f"Received transaction: {trans_num}")
-                    # display transaction details if needed
-                    print(json.dumps(transaction, indent=2))
-                    
-                    # Submit transaction to thread pool for processing
-                    executor.submit(process_single_transaction, transaction, db_collection, db_aux_collection)
-                    
-                except json.JSONDecodeError as e:
-                    print(f"Error decoding transaction data: {e}")
-                except Exception as e:
-                    print(f"Error queuing transaction: {e}")
-                    
-    except requests.exceptions.RequestException as e:
-        print(f"Stream connection error: {e}")
-    except Exception as e:
-        print(f"Unexpected error in stream handler: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        mongo_client.close()
-        print("Stream handler stopped.")
+                        trans_num = transaction.get('trans_num')
+                        print(f"Received transaction: {trans_num}")
+                        # display transaction details if needed
+                        print(json.dumps(transaction, indent=2))
+                        
+                        # Submit transaction to thread pool for processing
+                        executor.submit(process_single_transaction, transaction, db_collection, db_aux_collection)
+                        
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding transaction data: {e}")
+                    except Exception as e:
+                        print(f"Error queuing transaction: {e}")
+                        
+        except requests.exceptions.Timeout as e:
+            reconnect_attempts += 1
+            print(f"⏰ Stream timeout (attempt {reconnect_attempts}): {e}")
+            print("🔄 Will attempt to reconnect...")
+            
+        except requests.exceptions.RequestException as e:
+            reconnect_attempts += 1
+            print(f"🌐 Stream connection error (attempt {reconnect_attempts}): {e}")
+            print("🔄 Will attempt to reconnect...")
+            
+        except Exception as e:
+            reconnect_attempts += 1
+            print(f"❌ Unexpected error in stream handler (attempt {reconnect_attempts}): {e}")
+            import traceback
+            traceback.print_exc()
+            print("🔄 Will attempt to reconnect...")
+    
+    print(f"❌ Max reconnection attempts ({max_reconnect_attempts}) reached. Stream handler stopped.")
+    mongo_client.close()
 
 
 # Async wrapper for FastAPI lifespan compatibility
