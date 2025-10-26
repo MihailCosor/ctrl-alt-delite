@@ -73,20 +73,24 @@ export async function GET() {
       {
         $group: {
           _id: "$transaction.state",
-          fraudCount: { $sum: 1 }
+          fraudCount: { $sum: 1 },
+          totalAmount: { $sum: { $toDouble: "$transaction.amt" } },
+          affectedCities: { $addToSet: "$transaction.city" }
         }
       },
       {
         $project: {
           country: "$_id",
-          fraudCount: 1
+          fraudCount: 1,
+          totalAmount: { $round: ["$totalAmount", 2] },
+          affectedCitiesCount: { $size: "$affectedCities" }
         }
       }
     ]).toArray();
 
     return NextResponse.json({
-      topCitiesWithFraud,
-      topCountriesWithFraud,
+      topCities: topCitiesWithFraud,
+      topCountries: topCountriesWithFraud,
       fraudCountries,
       timestamp: new Date().toISOString()
     });
